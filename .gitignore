@@ -1,0 +1,35 @@
+# 敏感配置（含真实密钥）
+config.yaml
+config.example.yaml
+.env
+.env.local
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# 模型文件
+src/checkpoints/*.pt
+src/checkpoints/*.pth
+src/checkpoints/*.bin
+src/checkpoints/*.safetensors
+
+# 第三方源码（SAM2，体积过大，不入仓库）
+src/sam2_src/
+
+# Docker 运行时数据
+cache/
+assets/
+
+# IDE
+.idea/
+.vscode/
+
+# 日志
+*.log
+
+# 操作系统
+.DS_Store
+Thumbs.db
