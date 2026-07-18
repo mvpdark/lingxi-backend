@@ -197,21 +197,38 @@ class Config:
             if val:
                 setattr(self, attr, val)
 
-        # yunwu LLM：支持逗号分隔的多个 key
-        # yunwu 集成 key：LLM 与图像共用同一组 key，无需单独配置 IMAGE_API_KEY
-        llm_env = os.environ.get("LLM_API_KEY")
-        if llm_env:
-            keys = [k.strip() for k in llm_env.split(",") if k.strip()]
-            if keys:
-                self.llm_api_keys = keys
-                self.llm_api_key = keys[0]  # 向后兼容
+        # yunwu LLM：支持编号变量 LLM_API_KEY_1, LLM_API_KEY_2 ...
+        # yunwu 集成 key：LLM 与图像共用同一组 key，无需 IMAGE_API_KEY
+        numbered_keys = []
+        for i in range(1, 101):
+            v = os.environ.get(f"LLM_API_KEY_{i}")
+            if v and v.strip():
+                numbered_keys.append(v.strip())
+        if numbered_keys:
+            self.llm_api_keys = numbered_keys
+            self.llm_api_key = numbered_keys[0]
+        else:
+            llm_env = os.environ.get("LLM_API_KEY")
+            if llm_env:
+                keys = [k.strip() for k in llm_env.split(",") if k.strip()]
+                if keys:
+                    self.llm_api_keys = keys
+                    self.llm_api_key = keys[0]
 
-        # Tavily：支持逗号分隔的多个 key
-        tavily_env = os.environ.get("TAVILY_API_KEY")
-        if tavily_env:
-            keys = [k.strip() for k in tavily_env.split(",") if k.strip()]
-            if keys:
-                self.tavily.api_keys = keys
+        # Tavily：支持编号变量 TAVILY_API_KEY_1, TAVILY_API_KEY_2 ...
+        numbered_tavily = []
+        for i in range(1, 101):
+            v = os.environ.get(f"TAVILY_API_KEY_{i}")
+            if v and v.strip():
+                numbered_tavily.append(v.strip())
+        if numbered_tavily:
+            self.tavily.api_keys = numbered_tavily
+        else:
+            tavily_env = os.environ.get("TAVILY_API_KEY")
+            if tavily_env:
+                keys = [k.strip() for k in tavily_env.split(",") if k.strip()]
+                if keys:
+                    self.tavily.api_keys = keys
 
         # 计费汇率：float 解析
         billing_rate_env = os.environ.get("BILLING_RATE")
