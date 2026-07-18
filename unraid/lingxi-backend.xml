@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>lingxi-backend</Name>
-  <Repository>mvpdark/lingxi-backend:latest</Repository>
-  <Registry>https://hub.docker.com/r/mvpdark/lingxi-backend</Registry>
+  <Repository>ghcr.io/mvpdark/lingxi-backend:latest</Repository>
+  <Registry>https://github.com/mvpdark/lingxi-backend/pkgs/container/lingxi-backend</Registry>
   <Network>lingxi-net</Network>
   <MyIP/>
   <Shell>sh</Shell>
