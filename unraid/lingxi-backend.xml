@@ -30,12 +30,13 @@
   <Config Name="BILLING_RATE" Target="BILLING_RATE" Default="2.0" Mode="" Description="计费汇率（1 美元 = 多少人民币）" Type="Variable" Display="always" Required="true" Mask="false">2.0</Config>
   <Config Name="SERVE_FRONTEND" Target="SERVE_FRONTEND" Default="false" Mode="" Description="是否托管前端静态文件（纯 API 部署固定 false）" Type="Variable" Display="always" Required="true" Mask="false">false</Config>
   <Config Name="CORS_ORIGINS" Target="CORS_ORIGINS" Default="tauri://localhost,http://tauri.localhost" Mode="" Description="CORS 允许源（逗号分隔；Tauri v2 桌面端示例）" Type="Variable" Display="advanced" Required="false" Mask="false">tauri://localhost,http://tauri.localhost</Config>
-  <Config Name="LLM_API_BASE" Target="LLM_API_BASE" Default="https://yunwu.ai" Mode="" Description="LLM 对话 API 地址" Type="Variable" Display="advanced" Required="false" Mask="false">https://yunwu.ai</Config>
-  <Config Name="LLM_API_KEY" Target="LLM_API_KEY" Default="sk-aaa,sk-bbb,sk-ccc" Mode="" Description="LLM API Key，多个 key 用英文逗号分隔自动轮询（示例：sk-aaa,sk-bbb,sk-ccc）" Type="Variable" Display="always" Required="true" Mask="true">sk-aaa,sk-bbb,sk-ccc</Config>
+  <Config Name="LLM_API_BASE" Target="LLM_API_BASE" Default="https://yunwu.ai" Mode="" Description="yunwu API 地址（LLM 与图像共用）" Type="Variable" Display="advanced" Required="false" Mask="false">https://yunwu.ai</Config>
+  <Config Name="yunwu Key 1" Target="LLM_API_KEY_1" Default="" Mode="" Description="yunwu API Key #1（LLM + 图像共用，每个 key 独立变量）" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="yunwu Key 2" Target="LLM_API_KEY_2" Default="" Mode="" Description="yunwu API Key #2（留空则只用 Key 1）" Type="Variable" Display="always" Required="false" Mask="true"></Config>
   <Config Name="LLM_MODEL" Target="LLM_MODEL" Default="gpt-5.6-luna" Mode="" Description="LLM 主模型" Type="Variable" Display="advanced" Required="false" Mask="false">gpt-5.6-luna</Config>
-  <Config Name="IMAGE_API_BASE" Target="IMAGE_API_BASE" Default="https://yunwu.ai" Mode="" Description="图像生成 API 地址（与 LLM 相同，默认 yunwu.ai）" Type="Variable" Display="advanced" Required="false" Mask="false">https://yunwu.ai</Config>
-  <Config Name="IMAGE_MODEL" Target="IMAGE_MODEL" Default="gpt-image-2" Mode="" Description="图像生成模型" Type="Variable" Display="advanced" Required="false" Mask="false">gpt-image-2</Config>
-  <Config Name="TAVILY_API_KEY" Target="TAVILY_API_KEY" Default="tvly-aaa,tvly-bbb" Mode="" Description="Tavily 搜索 API Key，多个 key 用英文逗号分隔自动轮询（示例：tvly-aaa,tvly-bbb）" Type="Variable" Display="always" Required="true" Mask="true">tvly-aaa,tvly-bbb</Config>
+  <Config Name="IMAGE_MODEL" Target="IMAGE_MODEL" Default="gpt-image-2" Mode="" Description="图像生成模型（与 LLM 共用 yunwu key）" Type="Variable" Display="advanced" Required="false" Mask="false">gpt-image-2</Config>
+  <Config Name="Tavily Key 1" Target="TAVILY_API_KEY_1" Default="" Mode="" Description="Tavily 搜索 API Key #1" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Tavily Key 2" Target="TAVILY_API_KEY_2" Default="" Mode="" Description="Tavily 搜索 API Key #2（留空则只用 Key 1）" Type="Variable" Display="always" Required="false" Mask="true"></Config>
   <Config Name="ASSETS_DIR" Target="ASSETS_DIR" Default="/app/assets_cache" Mode="" Description="容器内资源目录（与上方缓存目录挂载点保持一致）" Type="Variable" Display="advanced" Required="false" Mask="false">/app/assets_cache</Config>
   <Config Name="API_TOKEN" Target="API_TOKEN" Default="" Mode="" Description="旧版服务间 API Token（可选，留空则用代码内默认值）" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
 </Container>
