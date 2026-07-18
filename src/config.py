@@ -55,8 +55,6 @@ class Config:
     llm_api_keys: list = field(default_factory=list)   # 多 key 轮询列表
     llm_model: str = "gpt-5.6-luna"
     image_api_base: str = "https://yunwu.ai"
-    image_api_key: str = ""         # 向后兼容（单 key）
-    image_api_keys: list = field(default_factory=list)  # 多 key 轮询列表
     image_model: str = "gpt-image-2"
     cache_dir: str = "cache"
 
@@ -138,18 +136,12 @@ class Config:
         if not llm_keys and llm.get("api_key"):
             llm_keys = [llm.get("api_key")]
 
-        image_keys = image.get("api_keys", [])
-        if not image_keys and image.get("api_key"):
-            image_keys = [image.get("api_key")]
-
         cfg = cls(
             llm_api_base=llm.get("api_base", cls.llm_api_base),
             llm_api_key=llm.get("api_key", ""),
             llm_api_keys=llm_keys,
             llm_model=llm.get("model", cls.llm_model),
             image_api_base=image.get("api_base", cls.image_api_base),
-            image_api_key=image.get("api_key", ""),
-            image_api_keys=image_keys,
             image_model=image.get("model", cls.image_model),
             cache_dir=data.get("cache_dir", cls.cache_dir),
             database_url=data.get("database_url", cls.database_url),
@@ -178,7 +170,7 @@ class Config:
 
         支持的环境变量：
             LLM_API_KEY / LLM_API_BASE / LLM_MODEL
-            IMAGE_API_KEY / IMAGE_API_BASE / IMAGE_MODEL
+            IMAGE_API_BASE / IMAGE_MODEL
             TAVILY_API_KEY  —— 支持逗号分隔的多个 key
             CACHE_DIR       —— 覆盖 cache_dir
             DATABASE_URL / JWT_SECRET / ADMIN_USERNAME
@@ -206,20 +198,13 @@ class Config:
                 setattr(self, attr, val)
 
         # yunwu LLM：支持逗号分隔的多个 key
+        # yunwu 集成 key：LLM 与图像共用同一组 key，无需单独配置 IMAGE_API_KEY
         llm_env = os.environ.get("LLM_API_KEY")
         if llm_env:
             keys = [k.strip() for k in llm_env.split(",") if k.strip()]
             if keys:
                 self.llm_api_keys = keys
                 self.llm_api_key = keys[0]  # 向后兼容
-
-        # yunwu 图片：支持逗号分隔的多个 key
-        image_env = os.environ.get("IMAGE_API_KEY")
-        if image_env:
-            keys = [k.strip() for k in image_env.split(",") if k.strip()]
-            if keys:
-                self.image_api_keys = keys
-                self.image_api_key = keys[0]  # 向后兼容
 
         # Tavily：支持逗号分隔的多个 key
         tavily_env = os.environ.get("TAVILY_API_KEY")

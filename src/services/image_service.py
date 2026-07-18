@@ -32,14 +32,12 @@ class ImageService:
         """初始化图片服务。
 
         参数:
-            config: 配置对象，需包含 image_api_base, image_api_key,
+            config: 配置对象，需包含 image_api_base, llm_api_keys,
                     image_model, cache_dir 属性
         """
         self.api_base = config.image_api_base
-        # 优先使用多 key 列表（轮询），回退到单 key
-        keys = getattr(config, "image_api_keys", [])
-        if not keys and getattr(config, "image_api_key", ""):
-            keys = [config.image_api_key]
+        # yunwu 集成 key：image 与 LLM 共用同一组 key（llm_api_keys）
+        keys = getattr(config, "llm_api_keys", []) or []
         self.key_pool = KeyPool(keys)
         self.model = config.image_model
         self.cache_dir = config.cache_dir

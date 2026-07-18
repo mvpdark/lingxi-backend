@@ -143,9 +143,9 @@ auth = AuthService(
     refresh_ttl=config.jwt_refresh_ttl,
 )
 
-# 计费服务：合并 LLM + Image 的所有 yunwu key 用于消耗查询
+# 计费服务：yunwu 集成 key（LLM + Image 共用）
 _all_yunwu_keys = list(dict.fromkeys(  # 去重保序
-    (config.llm_api_keys or []) + (config.image_api_keys or [])
+    (config.llm_api_keys or [])
 ))
 billing = BillingService(
     db_session_factory=async_session_factory,
