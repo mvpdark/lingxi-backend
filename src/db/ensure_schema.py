@@ -48,6 +48,21 @@ USAGE_STATS_MIGRATION_SQL: tuple[str, ...] = (
     "ON usage_stats (user_id, api_type, period);",
 )
 
+# billing_baselines 幂等列改名迁移（baseline_usd → baseline_cents）
+# 计费基数由「美元」改为「美分」后，旧库需把列名同步过来；
+# 新库由 create_all 直接建出 baseline_cents，此 DO 块因列不存在自动跳过。
+# PostgreSQL 的 ALTER TABLE ... RENAME COLUMN 不支持 IF EXISTS，
+# 故用 information_schema 检查 + DO 块包裹实现幂等。
+BILLING_BASELINE_MIGRATION_SQL: tuple[str, ...] = (
+    "DO $$ BEGIN "
+    "  IF EXISTS (SELECT 1 FROM information_schema.columns "
+    "             WHERE table_name='billing_baselines' "
+    "               AND column_name='baseline_usd') THEN "
+    "    ALTER TABLE billing_baselines RENAME COLUMN baseline_usd TO baseline_cents; "
+    "  END IF; "
+    "END $$;",
+)
+
 
 def _import_base():
     """按当前 sys.path 布局导入 ORM 声明式基类（兼容 src.db / db 两种布局）。"""
@@ -72,6 +87,8 @@ async def _ensure_schema(database_url: str) -> list[str]:
             await conn.run_sync(Base.metadata.create_all)
             # 2) 旧库增量迁移（幂等）
             for stmt in USAGE_STATS_MIGRATION_SQL:
+                await conn.execute(text(stmt))
+            for stmt in BILLING_BASELINE_MIGRATION_SQL:
                 await conn.execute(text(stmt))
         # 3) 读取并返回表清单
         async with engine.connect() as conn:

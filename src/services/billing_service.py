@@ -3,13 +3,13 @@
 管理用户账户余额与 yunwu API 消耗的计费关系。
 
 计费模型：
-- 计费比例由配置注入（billing_rate，默认 2.0）—— yunwu API 每消耗 1 美元，
+- 计费比例由配置注入（billing_rate，默认 2.0）—— yunwu API 每消耗 1 美分，
   账户扣减 billing_rate 元人民币
-- 通过查询 yunwu 的 billing 接口获取实际消耗（美元），与基准值对比计算增量
+- 通过查询 yunwu 的 billing 接口获取实际消耗（美分），与基准值对比计算增量
 
 yunwu API 接口（已验证可用）：
 - GET /v1/dashboard/billing/subscription → {"hard_limit_usd": 101.53, "token_name": "image2"}
-- GET /v1/dashboard/billing/usage → {"total_usage": 1526.68}（单位：美分，需 /100 转美元）
+- GET /v1/dashboard/billing/usage → {"total_usage": 1526.68}（单位：美分，直接作为计费基数）
 
 特性：
 - 多 key 轮询：通过 KeyPool 管理多个 yunwu key，失败自动切换并冷却
@@ -70,7 +70,7 @@ class BillingService:
         result = await billing.charge(user_id)                 # 执行计费扣款
     """
 
-    #: 计费比例默认值（1 美元 yunwu 消耗 = 2 元人民币）。
+    #: 计费比例默认值（1 美分 yunwu 消耗 = 2 元人民币）。
     #: 仅为类级缺省，实例化时会被构造参数 billing_rate 覆盖；
     #: 保留类属性是为了兼容 ``BillingService.RATE`` 的外部访问（如 server.py 日志）。
     RATE: Decimal = Decimal("2.0")
@@ -96,7 +96,7 @@ class BillingService:
             auth_service: 新版 AuthService 实例（async 方法，接受 user_id）
             api_keys: yunwu API key 列表
             api_base: yunwu API 基础地址
-            billing_rate: 计费比例（1 美元 = 多少人民币），从配置读取，不再硬编码
+            billing_rate: 计费比例（1 美分 = 多少人民币），从配置读取，不再硬编码
         """
         self.db = db_session_factory
         self.auth = auth_service
@@ -129,31 +129,35 @@ class BillingService:
         except (ValueError, AttributeError, TypeError):
             return None
 
-    def _to_rmb(self, usd: Decimal) -> Decimal:
-        """美元消耗按 RATE 折算人民币，量化到分（四舍五入）。"""
-        return (usd * self.RATE).quantize(self._CENT, rounding=ROUND_HALF_UP)
+    def _to_rmb(self, cents: Decimal) -> Decimal:
+        """美分消耗按 RATE 折算人民币，量化到分（四舍五入）。
 
-    async def _get_baseline_usd(self, session, uid: uuid.UUID) -> Optional[Decimal]:
-        """在指定会话中查询用户的 baseline（美元），不存在返回 None。"""
+        计费基数直接使用 yunwu API 返回的 total_usage（美分），
+        不再做 /100 美元换算 —— 即 1 美分消耗对应 RATE 元人民币。
+        """
+        return (cents * self.RATE).quantize(self._CENT, rounding=ROUND_HALF_UP)
+
+    async def _get_baseline_cents(self, session, uid: uuid.UUID) -> Optional[Decimal]:
+        """在指定会话中查询用户的 baseline（美分），不存在返回 None。"""
         result = await session.execute(
-            select(BillingBaseline.baseline_usd).where(
+            select(BillingBaseline.baseline_cents).where(
                 BillingBaseline.user_id == uid
             )
         )
         return result.scalar_one_or_none()
 
     async def _upsert_baseline(
-        self, session, uid: uuid.UUID, baseline_usd: Decimal
+        self, session, uid: uuid.UUID, baseline_cents: Decimal
     ) -> datetime:
         """UPSERT 用户 baseline（存在则更新，不存在则插入），返回写入的时间戳。"""
         now = datetime.now(timezone.utc)
         stmt = pg_insert(BillingBaseline).values(
             user_id=uid,
-            baseline_usd=baseline_usd,
+            baseline_cents=baseline_cents,
             updated_at=now,
         ).on_conflict_do_update(
             index_elements=["user_id"],
-            set_={"baseline_usd": baseline_usd, "updated_at": now},
+            set_={"baseline_cents": baseline_cents, "updated_at": now},
         )
         await session.execute(stmt)
         return now
@@ -172,9 +176,8 @@ class BillingService:
 
         返回:
             {
-                "total_usage_cents": float,  # 总消耗（美分）
-                "total_usage_usd": float,    # 总消耗（美元）
-                "hard_limit_usd": float,     # 额度上限（美元）
+                "total_usage_cents": float,  # 总消耗（美分，直接作为计费基数）
+                "hard_limit_usd": float,     # 额度上限（美元，仅展示用）
                 "token_name": str,           # token 名称
                 "ok": bool,                  # 是否成功
                 "error": str,                # 错误信息（失败时）
@@ -182,7 +185,6 @@ class BillingService:
         """
         result = {
             "total_usage_cents": 0.0,
-            "total_usage_usd": 0.0,
             "hard_limit_usd": 0.0,
             "token_name": "",
             "ok": False,
@@ -199,7 +201,7 @@ class BillingService:
 
         try:
             async with httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT) as client:
-                # 查询消耗（单位：美分）
+                # 查询消耗（单位：美分，直接作为计费基数，不再 /100 转美元）
                 resp = await client.get(
                     f"{self.api_base}/v1/dashboard/billing/usage",
                     headers=headers,
@@ -218,12 +220,8 @@ class BillingService:
                 hard_limit_usd = float(sub_data.get("hard_limit_usd", 0))
                 token_name = str(sub_data.get("token_name", ""))
 
-            # 美分转美元
-            total_usage_usd = total_usage_cents / 100.0
-
             result.update({
                 "total_usage_cents": total_usage_cents,
-                "total_usage_usd": total_usage_usd,
                 "hard_limit_usd": hard_limit_usd,
                 "token_name": token_name,
                 "ok": True,
@@ -231,8 +229,8 @@ class BillingService:
             # 查询成功，标记 key 恢复（清除可能的失败冷却状态）
             self.key_pool.mark_success(api_key)
             logger.info(
-                "key %s 消耗查询成功：%.2f 美分 / %.4f 美元，额度 %.2f 美元",
-                key_mask, total_usage_cents, total_usage_usd, hard_limit_usd,
+                "key %s 消耗查询成功：%.2f 美分，额度 %.2f 美元",
+                key_mask, total_usage_cents, hard_limit_usd,
             )
         except httpx.HTTPStatusError as e:
             result["error"] = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
@@ -258,25 +256,25 @@ class BillingService:
 
         返回:
             {
-                "keys": [...],            # 各 key 的查询结果列表
-                "total_usage_usd": float, # 所有 key 总消耗（美元）
-                "ok": bool,               # 是否至少有一个 key 查询成功
+                "keys": [...],              # 各 key 的查询结果列表
+                "total_usage_cents": float, # 所有 key 总消耗（美分）
+                "ok": bool,                 # 是否至少有一个 key 查询成功
             }
         """
         if not self._api_keys:
             logger.warning("无可用 key，无法查询 yunwu 消耗")
-            return {"keys": [], "total_usage_usd": 0.0, "ok": False}
+            return {"keys": [], "total_usage_cents": 0.0, "ok": False}
 
         # 并发查询所有 key，提升效率
         tasks = [self.query_key_usage(k) for k in self._api_keys]
         results = await asyncio.gather(*tasks)
 
-        total_usage_usd = sum(r.get("total_usage_usd", 0.0) for r in results)
+        total_usage_cents = sum(r.get("total_usage_cents", 0.0) for r in results)
         any_ok = any(r.get("ok", False) for r in results)
 
         return {
             "keys": results,
-            "total_usage_usd": total_usage_usd,
+            "total_usage_cents": total_usage_cents,
             "ok": any_ok,
         }
 
@@ -293,33 +291,33 @@ class BillingService:
             user_id: 用户 ID（UUID 字符串）
 
         返回:
-            {"user_id": str, "baseline_usd": float, "updated_at": str, "ok": bool}
+            {"user_id": str, "baseline_cents": float, "updated_at": str, "ok": bool}
         """
         uid = self._to_uuid(user_id)
         if uid is None:
             logger.warning("初始化 baseline 失败：非法 user_id %r", user_id)
             return {
                 "user_id": user_id,
-                "baseline_usd": 0.0,
+                "baseline_cents": 0.0,
                 "updated_at": None,
                 "ok": False,
             }
 
         usage = await self.get_all_keys_usage()
-        baseline_usd = Decimal(str(usage.get("total_usage_usd", 0.0)))
+        baseline_cents = Decimal(str(usage.get("total_usage_cents", 0.0)))
 
         async with self.db() as session:
             async with session.begin():
                 updated_at = await self._upsert_baseline(
-                    session, uid, baseline_usd
+                    session, uid, baseline_cents
                 )
 
         logger.info(
-            "用户 %s 初始化 baseline: %.4f 美元", user_id, float(baseline_usd)
+            "用户 %s 初始化 baseline: %.2f 美分", user_id, float(baseline_cents)
         )
         return {
             "user_id": user_id,
-            "baseline_usd": float(baseline_usd),
+            "baseline_cents": float(baseline_cents),
             "updated_at": updated_at.isoformat(),
             "ok": usage.get("ok", False),
         }
@@ -339,13 +337,13 @@ class BillingService:
         返回:
             {
                 "user_id": str,
-                "balance_rmb": float,        # 当前账户余额（人民币）
-                "baseline_usd": float,       # 基准消耗（美元）
-                "current_usage_usd": float,  # 当前消耗（美元）
-                "delta_usd": float,          # 增量消耗（美元）
-                "delta_rmb": float,          # 应扣金额（人民币）
-                "rate": float,               # 计费比例
-                "keys_count": int,           # yunwu key 数量
+                "balance_rmb": float,          # 当前账户余额（人民币）
+                "baseline_cents": float,       # 基准消耗（美分）
+                "current_usage_cents": float,  # 当前消耗（美分）
+                "delta_cents": float,          # 增量消耗（美分）
+                "delta_rmb": float,            # 应扣金额（人民币）
+                "rate": float,                 # 计费比例
+                "keys_count": int,             # yunwu key 数量
                 "ok": bool,
             }
         """
@@ -356,9 +354,9 @@ class BillingService:
             return {
                 "user_id": user_id,
                 "balance_rmb": 0.0,
-                "baseline_usd": 0.0,
-                "current_usage_usd": 0.0,
-                "delta_usd": 0.0,
+                "baseline_cents": 0.0,
+                "current_usage_cents": 0.0,
+                "delta_cents": 0.0,
                 "delta_rmb": 0.0,
                 "rate": float(self.RATE),
                 "keys_count": len(self._api_keys),
@@ -370,32 +368,32 @@ class BillingService:
 
         # 从 billing_baselines 表查询 baseline，没有则自动初始化
         async with self.db() as session:
-            baseline_usd = await self._get_baseline_usd(session, uid)
-        if baseline_usd is None:
+            baseline_cents = await self._get_baseline_cents(session, uid)
+        if baseline_cents is None:
             init_result = await self.init_baseline(user_id)
-            baseline_usd = Decimal(str(init_result.get("baseline_usd", 0.0)))
+            baseline_cents = Decimal(str(init_result.get("baseline_cents", 0.0)))
 
         # 查询当前总消耗
         usage = await self.get_all_keys_usage()
-        current_usd = Decimal(str(usage.get("total_usage_usd", 0.0)))
+        current_cents = Decimal(str(usage.get("total_usage_cents", 0.0)))
 
         # 计算增量与应扣金额
-        delta_usd = current_usd - baseline_usd
+        delta_cents = current_cents - baseline_cents
         # 消耗不可能减少，若 delta < 0 则视为 0（异常保护）
-        if delta_usd < 0:
+        if delta_cents < 0:
             logger.warning(
-                "用户 %s delta_usd=%.4f < 0（消耗减少，异常），本次按 0 计算",
-                user_id, float(delta_usd),
+                "用户 %s delta_cents=%.2f < 0（消耗减少，异常），本次按 0 计算",
+                user_id, float(delta_cents),
             )
-            delta_usd = Decimal("0")
-        delta_rmb = self._to_rmb(delta_usd)
+            delta_cents = Decimal("0")
+        delta_rmb = self._to_rmb(delta_cents)
 
         return {
             "user_id": user_id,
             "balance_rmb": float(balance_rmb),
-            "baseline_usd": float(baseline_usd),
-            "current_usage_usd": float(current_usd),
-            "delta_usd": float(delta_usd),
+            "baseline_cents": float(baseline_cents),
+            "current_usage_cents": float(current_cents),
+            "delta_cents": float(delta_cents),
             "delta_rmb": float(delta_rmb),
             "rate": float(self.RATE),
             "keys_count": len(self._api_keys),
@@ -418,7 +416,7 @@ class BillingService:
         已计入 baseline，下次不再重复计），而非重收（baseline 未推进
         导致下次对同一增量重复扣费）。
 
-        若 delta_usd < 0（消耗减少，不可能），不扣费但仍刷新 baseline。
+        若 delta_cents < 0（消耗减少，不可能），不扣费但仍刷新 baseline。
         若用户没有 baseline，自动调用 init_baseline 初始化。
 
         参数:
@@ -429,10 +427,10 @@ class BillingService:
             否则：
             {
                 "user_id": str,
-                "charged_rmb": float,       # 本次扣减金额（人民币）
-                "delta_usd": float,         # 本次增量消耗（美元）
-                "new_balance": float,       # 扣减后新余额（人民币）
-                "new_baseline_usd": float,  # 新基准消耗（美元）
+                "charged_rmb": float,         # 本次扣减金额（人民币）
+                "delta_cents": float,         # 本次增量消耗（美分）
+                "new_balance": float,         # 扣减后新余额（人民币）
+                "new_baseline_cents": float,  # 新基准消耗（美分）
                 "ok": bool,
             }
         """
@@ -442,9 +440,9 @@ class BillingService:
             return {
                 "user_id": user_id,
                 "charged_rmb": 0.0,
-                "delta_usd": 0.0,
+                "delta_cents": 0.0,
                 "new_balance": 0.0,
-                "new_baseline_usd": 0.0,
+                "new_baseline_cents": 0.0,
                 "ok": False,
             }
 
@@ -470,26 +468,26 @@ class BillingService:
         async with self._charge_lock:
             # 读取 baseline，没有则自动初始化
             async with self.db() as session:
-                baseline_usd = await self._get_baseline_usd(session, uid)
-            if baseline_usd is None:
+                baseline_cents = await self._get_baseline_cents(session, uid)
+            if baseline_cents is None:
                 init_result = await self.init_baseline(user_id)
-                baseline_usd = Decimal(str(init_result.get("baseline_usd", 0.0)))
+                baseline_cents = Decimal(str(init_result.get("baseline_cents", 0.0)))
 
             # 查询当前总消耗
             usage = await self.get_all_keys_usage()
-            current_usd = Decimal(str(usage.get("total_usage_usd", 0.0)))
+            current_cents = Decimal(str(usage.get("total_usage_cents", 0.0)))
 
             # 计算增量
-            delta_usd = current_usd - baseline_usd
+            delta_cents = current_cents - baseline_cents
             # 消耗不可能减少，若 delta < 0 不扣费
-            if delta_usd < 0:
+            if delta_cents < 0:
                 logger.warning(
-                    "用户 %s delta_usd=%.4f < 0（消耗减少，异常），本次不扣费",
-                    user_id, float(delta_usd),
+                    "用户 %s delta_cents=%.2f < 0（消耗减少，异常），本次不扣费",
+                    user_id, float(delta_cents),
                 )
-                delta_usd = Decimal("0")
+                delta_cents = Decimal("0")
 
-            delta_rmb = self._to_rmb(delta_usd)
+            delta_rmb = self._to_rmb(delta_cents)
 
             # P1-5 扣款原子性：先 UPSERT 推进 baseline，再扣款。
             # 若扣款失败（用户不存在 / 余额不足），最坏结果是漏收
@@ -497,7 +495,7 @@ class BillingService:
             # （baseline 未推进导致下次对同一增量重复扣费）
             async with self.db() as session:
                 async with session.begin():
-                    await self._upsert_baseline(session, uid, current_usd)
+                    await self._upsert_baseline(session, uid, current_cents)
 
             # 扣减余额（仅当有实际扣费金额时），单条 UPDATE 原子完成
             if delta_rmb > 0:
@@ -511,9 +509,9 @@ class BillingService:
                     return {
                         "user_id": user_id,
                         "charged_rmb": 0.0,
-                        "delta_usd": float(delta_usd),
+                        "delta_cents": float(delta_cents),
                         "new_balance": 0.0,
-                        "new_baseline_usd": float(current_usd),
+                        "new_baseline_cents": float(current_cents),
                         "ok": False,
                     }
 
@@ -526,17 +524,17 @@ class BillingService:
         )
 
         logger.info(
-            "用户 %s 计费完成：delta=%.4f 美元，扣减 %.2f 元，新余额 %.2f，新 baseline=%.4f 美元",
-            user_id, float(delta_usd), float(delta_rmb),
-            float(new_balance), float(current_usd),
+            "用户 %s 计费完成：delta=%.2f 美分，扣减 %.2f 元，新余额 %.2f，新 baseline=%.2f 美分",
+            user_id, float(delta_cents), float(delta_rmb),
+            float(new_balance), float(current_cents),
         )
 
         return {
             "user_id": user_id,
             "charged_rmb": float(delta_rmb),
-            "delta_usd": float(delta_usd),
+            "delta_cents": float(delta_cents),
             "new_balance": float(new_balance),
-            "new_baseline_usd": float(current_usd),
+            "new_baseline_cents": float(current_cents),
             "ok": account is not None,
         }
 

@@ -128,7 +128,7 @@ class BillingBaseline(Base):
         nullable=False,
         unique=True,
     )
-    baseline_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    baseline_cents: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

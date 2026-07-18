@@ -71,7 +71,7 @@ class Config:
     webdav_password: str = ""
     # 管理员（首个注册用户自动成为 admin）
     admin_username: str = "admin"
-    # 计费汇率（1美元=多少人民币），替代硬编码 RATE = 2.0
+    # 计费汇率（1美分=多少人民币），替代硬编码 RATE = 2.0
     billing_rate: float = 2.0
 
     # 阶段5：纯 API 模式开关（False 时不托管前端静态文件，仅提供 REST/WebSocket/图片代理）
